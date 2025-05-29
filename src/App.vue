@@ -87,6 +87,8 @@ import { onMounted, ref, onUnmounted } from 'vue';
 
 const danmuList = ref([]); // 存储弹幕数据
 const maxDanmuCount = 40; // 限制弹幕显示数量
+const shownDanmuIds = new Set(); // ✅ 新增：记录已显示的弹幕
+
 let socket;
 
 // 随机分配动画类型和颜色
@@ -105,18 +107,29 @@ function getRandomColor() {
 
 // 处理接收到的新弹幕
 function handleNewDanmu(data) {
+    // 为弹幕生成唯一 ID（假设 data 里有 clientId 和 timestamp）
+  const danmuId = `${data.clientId}|${data.timestamp}`;
+
+  // 如果已经展示过这条弹幕，跳过
+  if (shownDanmuIds.has(danmuId)) return;
+  shownDanmuIds.add(danmuId);
+
   const newDanmu = {
     ...data,
-    animationClass: getRandomAnimationClass(), // 随机动画
-    topPosition: `${Math.random() * 80}vh`, // 随机顶部位置，避免遮挡
-    textColor: getRandomColor() // 随机颜色
+    animationClass: getRandomAnimationClass(),
+    topPosition: `${Math.random() * 80}vh`,
+    textColor: getRandomColor()
   };
-  
+
   danmuList.value.push(newDanmu);
 
-  // 如果弹幕数量超过限制，移除最早的弹幕
   if (danmuList.value.length > maxDanmuCount) {
     danmuList.value.shift();
+  }
+
+  // 限制 Set 的大小，防止内存无限增长
+  if (shownDanmuIds.size > 1000) {
+    shownDanmuIds.clear();
   }
 }
 
