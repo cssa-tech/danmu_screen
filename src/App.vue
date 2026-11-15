@@ -88,6 +88,7 @@ import { onMounted, ref, onUnmounted } from 'vue';
 const danmuList = ref([]); // 存储弹幕数据
 const maxDanmuCount = 40; // 限制弹幕显示数量
 const shownDanmuIds = new Set(); // ✅ 新增：记录已显示的弹幕
+let nextDanmuKey = 0; // 每条弹幕的固定渲染 key，不能用下标，否则删掉旧弹幕后动画会重播
 
 let socket;
 
@@ -116,6 +117,7 @@ function handleNewDanmu(data) {
 
   const newDanmu = {
     ...data,
+    renderKey: nextDanmuKey++,
     animationClass: getRandomAnimationClass(),
     topPosition: `${Math.random() * 80}vh`,
     textColor: getRandomColor()
@@ -135,23 +137,36 @@ function handleNewDanmu(data) {
 
 // 初始化 WebSocket 连接
 function initializeWebSocket() {
-  socket = new WebSocket('ws://10.2.12.248:8080'); // 替换为 WebSocket 服务器地址
+  // 后端地址：构建时可用 VITE_WS_URL 指定；默认连当前网站的 /ws，
+  // 由 nginx（线上）或 vite 开发服务器（本地）转发到后端的 8080 端口
+  const wsUrl = import.meta.env.VITE_WS_URL
+    || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+  socket = new WebSocket(wsUrl);
 
   socket.onopen = () => console.log('WebSocket 连接成功');
   socket.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    handleNewDanmu(data);
+    try {
+      handleNewDanmu(JSON.parse(event.data));
+    } catch (e) {
+      console.error('弹幕数据格式错误:', e);
+    }
   };
   socket.onerror = (error) => console.error('WebSocket 错误:', error);
-  socket.onclose = () => console.log('WebSocket 连接关闭');
+  socket.onclose = () => {
+    // 活动中大屏幕不能断：断开后自动重连
+    console.log('WebSocket 连接关闭，2 秒后重连');
+    if (!unmounted) setTimeout(initializeWebSocket, 2000);
+  };
 }
 
 // 在组件挂载和卸载时管理 WebSocket 连接
+let unmounted = false;
 onMounted(() => {
   initializeWebSocket();
 });
 
 onUnmounted(() => {
+  unmounted = true;
   if (socket) {
     socket.close();
   }
@@ -162,8 +177,8 @@ onUnmounted(() => {
     <div>
       <div id="danmu-container">
         <div
-          v-for="(danmu, index) in danmuList"
-          :key="index"
+          v-for="danmu in danmuList"
+          :key="danmu.renderKey"
           class="danmu-item"
           :class="danmu.animationClass"
           :style="{ top: danmu.topPosition }"
